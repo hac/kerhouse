@@ -1,28 +1,13 @@
 /**
  * Skill Scoring Computation Script
  *
- * This script computes skill scores for all users based on their repository data.
- * It reads from the existing `analyses` table (which contains `top_repos_json`)
- * and populates the `user_skill_scores` table.
- *
- * Usage:
- *   npx tsx scripts/compute-skill-scores.ts
- *
- * The scoring algorithm:
- * 1. For each user, get their top_repos_json from the analyses table
- * 2. For each skill in the skills table, check if any repos match
- * 3. Calculate a score based on:
- *    - Stars of matching repos (log scale to reduce outliers)
- *    - Number of PRs contributed to matching repos
- *    - Whether the repo language matches the skill
- *    - Whether repo topics match the skill
- * 4. Store the score in user_skill_scores
+ * Usage: npm run db:compute-skills
  */
 
 import { neon } from "@neondatabase/serverless"
 
 if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL is not set. Run with: DATABASE_URL=... npx tsx scripts/compute-skill-scores.ts")
+  throw new Error("DATABASE_URL is not set")
 }
 
 const sql = neon(process.env.DATABASE_URL)
@@ -102,22 +87,17 @@ function calculateSkillScore(matchingRepos: TopRepo[]): number {
 
   for (const repo of matchingRepos) {
     const stars = repo.stars || 0
-    const prs = repo.userPRs || 1 // minimum 1 PR assumed
+    const prs = repo.userPRs || 1
 
     // Log scale for stars to reduce impact of outliers
-    // A repo with 1000 stars isn't 1000x more valuable than 1 star
     const starScore = stars > 0 ? Math.log10(stars + 1) * 10 : 0
 
     // PR contribution multiplier - more PRs = more expertise demonstrated
-    const prMultiplier = Math.min(Math.log2(prs + 1) + 1, 3) // cap at 3x
+    const prMultiplier = Math.min(Math.log2(prs + 1) + 1, 3)
 
-    // Combined score for this repo
-    const repoScore = starScore * prMultiplier
-
-    totalScore += repoScore
+    totalScore += starScore * prMultiplier
   }
 
-  // Round to 2 decimal places
   return Math.round(totalScore * 100) / 100
 }
 
@@ -158,13 +138,31 @@ async function computeAllSkillScores(): Promise<void> {
   ` as UserAnalysis[]
   console.log(`Found ${users.length} users`)
 
+  // Debug: show sample of first user with repos
+  const sampleUser = users.find(u => u.top_repos_json && u.top_repos_json !== '[]')
+  if (sampleUser) {
+    console.log("\nSample user repo data structure:")
+    const repos = parseTopRepos(sampleUser.top_repos_json)
+    if (repos.length > 0) {
+      console.log("Fields in first repo:", Object.keys(repos[0]))
+      console.log("Sample repo:", JSON.stringify(repos[0], null, 2))
+    }
+  } else {
+    console.log("\nWARNING: No users found with repo data!")
+  }
+
   // 3. Compute scores for each user-skill pair
-  console.log("Computing scores...")
+  console.log("\nComputing scores...")
   const allScores: UserSkillData[] = []
   let processed = 0
+  let usersWithRepos = 0
 
   for (const user of users) {
     const repos = parseTopRepos(user.top_repos_json)
+
+    if (repos.length > 0) {
+      usersWithRepos++
+    }
 
     for (const skill of skills) {
       const matchingRepos = repos.filter(repo => repoMatchesSkill(repo, skill))
@@ -172,9 +170,7 @@ async function computeAllSkillScores(): Promise<void> {
       if (matchingRepos.length > 0) {
         const score = calculateSkillScore(matchingRepos)
 
-        // Only store if there's a meaningful score
         if (score > 0) {
-          // Get top 5 repos for this skill
           const topRepos = matchingRepos
             .sort((a, b) => (b.stars || 0) - (a.stars || 0))
             .slice(0, 5)
@@ -191,20 +187,24 @@ async function computeAllSkillScores(): Promise<void> {
     }
 
     processed++
-    if (processed % 100 === 0) {
+    if (processed % 10000 === 0) {
       console.log(`Processed ${processed}/${users.length} users...`)
     }
   }
 
+  console.log(`\nUsers with repo data: ${usersWithRepos}`)
   console.log(`Computed ${allScores.length} user-skill scores`)
 
-  // 4. Clear existing scores and insert new ones (transactional)
-  console.log("Saving scores to database...")
+  if (allScores.length === 0) {
+    console.log("\nNo scores computed. Check if repo data has 'language' or 'topics' fields.")
+    return
+  }
 
-  // Delete all existing scores
+  // 4. Clear existing scores and insert new ones
+  console.log("\nSaving scores to database...")
   await sql`DELETE FROM user_skill_scores`
 
-  // Insert in batches of 100
+  // Insert in batches
   const batchSize = 100
   for (let i = 0; i < allScores.length; i += batchSize) {
     const batch = allScores.slice(i, i + batchSize)
@@ -228,14 +228,14 @@ async function computeAllSkillScores(): Promise<void> {
       `
     }
 
-    if ((i + batchSize) % 500 === 0 || i + batchSize >= allScores.length) {
+    if ((i + batchSize) % 1000 === 0 || i + batchSize >= allScores.length) {
       console.log(`Saved ${Math.min(i + batchSize, allScores.length)}/${allScores.length} scores...`)
     }
   }
 
   console.log("Done!")
 
-  // Print some stats
+  // Print stats
   const stats = await sql`
     SELECT
       skill_slug,
