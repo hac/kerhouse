@@ -121,7 +121,7 @@ async function getDevs(
 
   if (filters.topics && filters.topics.length > 0) {
     // Use EXISTS with github_repos.topics array for efficient topic filtering
-    // This finds devs who contributed to repos with matching topics
+    // Topics are normalized to lowercase in the database
     for (const topic of filters.topics) {
       const paramIdx = params.length + 1
       const condition = `EXISTS (
@@ -132,7 +132,7 @@ async function getDevs(
       )`
       if (validateCondition(condition)) {
         conditions.push(condition)
-        params.push(topic)
+        params.push(topic.toLowerCase()) // Normalize to lowercase
       }
     }
   }
