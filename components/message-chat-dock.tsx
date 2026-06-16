@@ -1,15 +1,41 @@
 "use client"
 
-import Link from "next/link"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { ArrowLeft, ChevronUp, Minus, Send, X } from "lucide-react"
-import { inboxThreadPreviews } from "@/lib/inbox-threads"
 
 export type ChatBubble = {
   id: string
   from: "self" | "peer"
   text: string
   time: string
+}
+
+type ConversationSummary = {
+  peer: string
+  lastMessage: string | null
+  lastMessageAt: string | null
+  unread: number
+}
+
+type ApiMessage = {
+  id: string
+  from: "self" | "peer"
+  text: string
+  sentAt: string
+  readAt: string | null
+}
+
+const POLL_MS = 5000
+
+function formatTime(iso: string | null): string {
+  if (!iso) return ""
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ""
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+}
+
+function toBubble(m: ApiMessage): ChatBubble {
+  return { id: m.id, from: m.from, text: m.text, time: formatTime(m.sentAt) }
 }
 
 export function MessageChatDock({
@@ -28,23 +54,72 @@ export function MessageChatDock({
   selfUsername: string
 }) {
   const [messages, setMessages] = useState<ChatBubble[]>([])
+  const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [draft, setDraft] = useState("")
   const [collapsed, setCollapsed] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [sending, setSending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const isInbox = peerUsername === null
 
+  // Load the conversation list while the inbox is visible (with light polling).
   useEffect(() => {
-    if (!open) {
-      setCollapsed(false)
-      return
+    if (!open || !isInbox) return
+    let cancelled = false
+    const load = async () => {
+      try {
+        const res = await fetch("/api/messages")
+        if (!res.ok) return
+        const data = await res.json()
+        if (!cancelled) setConversations(data.conversations ?? [])
+      } catch {
+        /* transient network error — keep showing last data */
+      }
     }
-    if (peerUsername) {
-      setMessages([])
-      setDraft("")
+    setLoading(true)
+    load().finally(() => {
+      if (!cancelled) setLoading(false)
+    })
+    const interval = setInterval(load, POLL_MS)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
     }
-    setCollapsed(false)
+  }, [open, isInbox])
+
+  // Load (and poll) the message history for the open peer.
+  useEffect(() => {
+    if (!open || !peerUsername) return
+    let cancelled = false
+    const load = async (withSpinner: boolean) => {
+      if (withSpinner) setLoading(true)
+      try {
+        const res = await fetch(`/api/messages/${encodeURIComponent(peerUsername)}`)
+        if (!res.ok) return
+        const data = await res.json()
+        if (!cancelled) setMessages((data.messages ?? []).map(toBubble))
+      } catch {
+        /* keep last data on transient error */
+      } finally {
+        if (!cancelled && withSpinner) setLoading(false)
+      }
+    }
+    setMessages([])
+    setDraft("")
+    setError(null)
+    load(true)
+    const interval = setInterval(() => load(false), POLL_MS)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
   }, [open, peerUsername])
+
+  useEffect(() => {
+    if (!open) setCollapsed(false)
+  }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -60,6 +135,45 @@ export function MessageChatDock({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages, open, isInbox])
+
+  const send = useCallback(async () => {
+    const t = draft.trim()
+    if (!t || !peerUsername || sending) return
+
+    setSending(true)
+    setError(null)
+    const optimistic: ChatBubble = {
+      id: `temp-${Date.now()}`,
+      from: "self",
+      text: t,
+      time: formatTime(new Date().toISOString()),
+    }
+    setMessages((m) => [...m, optimistic])
+    setDraft("")
+
+    try {
+      const res = await fetch(`/api/messages/${encodeURIComponent(peerUsername)}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ content: t }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error || "Failed to send message")
+      }
+      const data = await res.json()
+      // Swap the optimistic bubble for the persisted one.
+      setMessages((m) =>
+        m.map((b) => (b.id === optimistic.id ? toBubble(data.message) : b))
+      )
+    } catch (err) {
+      setMessages((m) => m.filter((b) => b.id !== optimistic.id))
+      setDraft(t)
+      setError(err instanceof Error ? err.message : "Failed to send message")
+    } finally {
+      setSending(false)
+    }
+  }, [draft, peerUsername, sending])
 
   if (!open) return null
 
@@ -87,48 +201,36 @@ export function MessageChatDock({
         <div
           className={dockCollapsed}
           role="dialog"
-        aria-label={isInbox ? "Inbox" : `Message ${peerUsername}`}
-        onDoubleClick={() => setCollapsed(false)}
-      >
-        <button
-          type="button"
-          onClick={() => setCollapsed(false)}
-          className="min-w-0 flex-1 text-left text-sm font-bold text-highlight truncate hover:underline underline-offset-2"
-          aria-expanded="false"
-        >
-          {collapsedLabel}
-        </button>
-        <div
-          className="flex items-center gap-0.5 shrink-0"
-          onDoubleClick={(e) => e.stopPropagation()}
+          aria-label={isInbox ? "Inbox" : `Message ${peerUsername}`}
+          onDoubleClick={() => setCollapsed(false)}
         >
           <button
             type="button"
             onClick={() => setCollapsed(false)}
-            className="p-1 hover:bg-foreground/10"
-            aria-label="Expand"
+            className="min-w-0 flex-1 text-left text-sm font-bold text-highlight truncate hover:underline underline-offset-2"
+            aria-expanded="false"
           >
-            <ChevronUp className="w-4 h-4" />
+            {collapsedLabel}
           </button>
-          <button type="button" onClick={onClose} className="p-1 hover:bg-foreground/10" aria-label="Close">
-            <X className="w-4 h-4" />
-          </button>
+          <div
+            className="flex items-center gap-0.5 shrink-0"
+            onDoubleClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setCollapsed(false)}
+              className="p-1 hover:bg-foreground/10"
+              aria-label="Expand"
+            >
+              <ChevronUp className="w-4 h-4" />
+            </button>
+            <button type="button" onClick={onClose} className="p-1 hover:bg-foreground/10" aria-label="Close">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
-      </div>
       </>
     )
-  }
-
-  function send() {
-    const t = draft.trim()
-    if (!t || !peerUsername) return
-    const now = new Date()
-    const time = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    setMessages((m) => [
-      ...m,
-      { id: `m-${now.getTime()}`, from: "self", text: t, time },
-    ])
-    setDraft("")
   }
 
   return (
@@ -137,126 +239,151 @@ export function MessageChatDock({
       <div
         className={dockExpanded}
         role="dialog"
-      aria-label={isInbox ? "Inbox" : `Message ${peerUsername}`}
-      aria-expanded="true"
-    >
-      <div
-        className="flex items-center justify-between gap-2 px-3 py-2 border-b-2 border-foreground shrink-0 cursor-default"
-        onDoubleClick={() => setCollapsed(true)}
+        aria-label={isInbox ? "Inbox" : `Message ${peerUsername}`}
+        aria-expanded="true"
       >
-        {isInbox ? (
-          <p className="text-sm font-bold text-highlight truncate min-w-0">Inbox</p>
-        ) : (
-          <div className="flex items-center gap-1 min-w-0 flex-1">
-            <button
-              type="button"
-              onClick={onBackToInbox}
-              className="p-1 shrink-0 hover:bg-foreground/10"
-              aria-label="Back to inbox"
-            >
-              <ArrowLeft className="w-4 h-4" />
-            </button>
-            <p className="text-sm font-bold text-highlight truncate min-w-0">{headerTitle}</p>
-          </div>
-        )}
         <div
-          className="flex items-center gap-0.5 shrink-0"
-          onDoubleClick={(e) => e.stopPropagation()}
+          className="flex items-center justify-between gap-2 px-3 py-2 border-b-2 border-foreground shrink-0 cursor-default"
+          onDoubleClick={() => setCollapsed(true)}
         >
-          <button
-            type="button"
-            onClick={() => setCollapsed(true)}
-            className="p-1 hover:bg-foreground/10"
-            aria-label="Collapse"
+          {isInbox ? (
+            <p className="text-sm font-bold text-highlight truncate min-w-0">Inbox</p>
+          ) : (
+            <div className="flex items-center gap-1 min-w-0 flex-1">
+              <button
+                type="button"
+                onClick={onBackToInbox}
+                className="p-1 shrink-0 hover:bg-foreground/10"
+                aria-label="Back to inbox"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+              <p className="text-sm font-bold text-highlight truncate min-w-0">{headerTitle}</p>
+            </div>
+          )}
+          <div
+            className="flex items-center gap-0.5 shrink-0"
+            onDoubleClick={(e) => e.stopPropagation()}
           >
-            <Minus className="w-4 h-4" />
-          </button>
-          <button type="button" onClick={onClose} className="p-1 hover:bg-foreground/10" aria-label="Close">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-
-      {isInbox ? (
-        <div className="flex-1 overflow-y-auto min-h-0">
-          <ul className="divide-y divide-foreground border-b border-foreground">
-            {inboxThreadPreviews.map((t) => (
-              <li key={t.peer}>
-                <Link
-                  href={`/${t.peer}`}
-                  onClick={() => onOpenPeer(t.peer)}
-                  className="group/inboxrow block w-full cursor-pointer text-left py-3 px-3 hover:bg-foreground hover:text-background"
-                >
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span className="font-bold text-highlight text-sm group-hover/inboxrow:text-background">
-                      {t.peer}
-                    </span>
-                    <span className="text-xs text-muted-foreground tabular-nums shrink-0 group-hover/inboxrow:text-background/80">
-                      {t.time}
-                    </span>
-                  </div>
-                  <p className="text-sm text-muted-foreground mt-1 line-clamp-1 group-hover/inboxrow:text-background/80">
-                    {t.preview}
-                  </p>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : (
-        <>
-          <div className="flex-1 overflow-y-auto px-3 py-2 text-sm min-h-0">
-            {messages.map((m, i) => {
-              const label = m.from === "self" ? selfUsername : peerUsername
-              const prev = messages[i - 1]
-              const next = messages[i + 1]
-              const showHeader = i === 0 || prev?.from !== m.from
-              const showTime = i === messages.length - 1 || next?.from !== m.from
-              return (
-                <div
-                  key={m.id}
-                  className={`max-w-[95%] min-w-0 ${showHeader ? (i === 0 ? "" : "mt-4") : "mt-1.5"}`}
-                >
-                  {showHeader ? (
-                    <p className="text-[10px] font-mono text-muted-foreground mb-1">{label}</p>
-                  ) : null}
-                  <p className="leading-snug text-foreground">{m.text}</p>
-                  {showTime ? (
-                    <p className="text-[10px] mt-1 tabular-nums text-muted-foreground">{m.time}</p>
-                  ) : null}
-                </div>
-              )
-            })}
-            <div ref={bottomRef} />
-          </div>
-
-          <div className="border-t-2 border-foreground p-2 shrink-0 flex gap-2 items-end">
-            <textarea
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault()
-                  send()
-                }
-              }}
-              rows={2}
-              placeholder="Write a message…"
-              className="flex-1 min-h-[40px] max-h-24 border border-foreground bg-background px-2 py-1.5 text-sm resize-none placeholder:text-muted-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-foreground"
-            />
             <button
               type="button"
-              onClick={send}
-              disabled={!draft.trim()}
-              className="shrink-0 border-2 border-foreground p-2 hover:bg-foreground hover:text-background disabled:opacity-40 disabled:pointer-events-none"
-              aria-label="Send"
+              onClick={() => setCollapsed(true)}
+              className="p-1 hover:bg-foreground/10"
+              aria-label="Collapse"
             >
-              <Send className="w-4 h-4" />
+              <Minus className="w-4 h-4" />
+            </button>
+            <button type="button" onClick={onClose} className="p-1 hover:bg-foreground/10" aria-label="Close">
+              <X className="w-4 h-4" />
             </button>
           </div>
-        </>
-      )}
-    </div>
+        </div>
+
+        {isInbox ? (
+          <div className="flex-1 overflow-y-auto min-h-0">
+            {conversations.length === 0 ? (
+              <p className="px-3 py-6 text-sm text-muted-foreground">
+                {loading ? "Loading…" : "No conversations yet. Open a developer's profile and hit Message to start one."}
+              </p>
+            ) : (
+              <ul className="divide-y divide-foreground border-b border-foreground">
+                {conversations.map((t) => (
+                  <li key={t.peer}>
+                    <button
+                      type="button"
+                      onClick={() => onOpenPeer(t.peer)}
+                      className="group/inboxrow block w-full cursor-pointer text-left py-3 px-3 hover:bg-foreground hover:text-background"
+                    >
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="font-bold text-highlight text-sm group-hover/inboxrow:text-background flex items-center gap-1.5 min-w-0">
+                          <span className="truncate">{t.peer}</span>
+                          {t.unread > 0 ? (
+                            <span className="shrink-0 text-[10px] font-bold bg-highlight text-background rounded-full px-1.5 py-0.5 group-hover/inboxrow:bg-background group-hover/inboxrow:text-foreground">
+                              {t.unread}
+                            </span>
+                          ) : null}
+                        </span>
+                        <span className="text-xs text-muted-foreground tabular-nums shrink-0 group-hover/inboxrow:text-background/80">
+                          {formatTime(t.lastMessageAt)}
+                        </span>
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-1 line-clamp-1 group-hover/inboxrow:text-background/80">
+                        {t.lastMessage ?? "No messages yet"}
+                      </p>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="flex-1 overflow-y-auto px-3 py-2 text-sm min-h-0">
+              {loading && messages.length === 0 ? (
+                <p className="text-muted-foreground">Loading…</p>
+              ) : messages.length === 0 ? (
+                <p className="text-muted-foreground">
+                  No messages yet. Say hi to {peerUsername}.
+                </p>
+              ) : (
+                messages.map((m, i) => {
+                  const label = m.from === "self" ? selfUsername : peerUsername
+                  const prev = messages[i - 1]
+                  const next = messages[i + 1]
+                  const showHeader = i === 0 || prev?.from !== m.from
+                  const showTime = i === messages.length - 1 || next?.from !== m.from
+                  return (
+                    <div
+                      key={m.id}
+                      className={`max-w-[95%] min-w-0 ${showHeader ? (i === 0 ? "" : "mt-4") : "mt-1.5"}`}
+                    >
+                      {showHeader ? (
+                        <p className="text-[10px] font-mono text-muted-foreground mb-1">{label}</p>
+                      ) : null}
+                      <p className="leading-snug text-foreground">{m.text}</p>
+                      {showTime ? (
+                        <p className="text-[10px] mt-1 tabular-nums text-muted-foreground">{m.time}</p>
+                      ) : null}
+                    </div>
+                  )
+                })
+              )}
+              <div ref={bottomRef} />
+            </div>
+
+            {error ? (
+              <p className="px-3 pb-1 text-[11px] text-red-500" role="alert">
+                {error}
+              </p>
+            ) : null}
+
+            <div className="border-t-2 border-foreground p-2 shrink-0 flex gap-2 items-end">
+              <textarea
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault()
+                    send()
+                  }
+                }}
+                rows={2}
+                placeholder="Write a message…"
+                className="flex-1 min-h-[40px] max-h-24 border border-foreground bg-background px-2 py-1.5 text-sm resize-none placeholder:text-muted-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-foreground"
+              />
+              <button
+                type="button"
+                onClick={send}
+                disabled={!draft.trim() || sending}
+                className="shrink-0 border-2 border-foreground p-2 hover:bg-foreground hover:text-background disabled:opacity-40 disabled:pointer-events-none"
+                aria-label="Send"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </>
   )
 }

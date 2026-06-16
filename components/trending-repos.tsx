@@ -1,8 +1,31 @@
 "use client"
 
 import { useState, useRef, useEffect, useCallback } from "react"
-import { Star, GitFork, ChevronDown, ExternalLink, Loader2 } from "lucide-react"
+import Link from "next/link"
+import { Star, ChevronDown, Loader2, Search, GitFork } from "lucide-react"
 import type { TrendingRepo, ReposResponse } from "@/app/api/github/repos/route"
+
+const LANGUAGE_COLORS: Record<string, string> = {
+  TypeScript: "#3178c6",
+  JavaScript: "#f1e05a",
+  Python: "#3572A5",
+  Rust: "#dea584",
+  Go: "#00ADD8",
+  "C++": "#f34b7d",
+  Java: "#b07219",
+  C: "#555555",
+  "C#": "#178600",
+  Kotlin: "#A97BFF",
+  Swift: "#F05138",
+  Lua: "#000080",
+  PowerShell: "#012456",
+  HTML: "#e34c26",
+}
+
+function getLanguageColor(lang: string | null): string {
+  if (!lang) return "#6e7681"
+  return LANGUAGE_COLORS[lang] || "#6e7681"
+}
 
 function Dropdown({
   label,
@@ -74,12 +97,12 @@ function formatStars(stars: number): string {
   return stars.toLocaleString()
 }
 
-function getTimeAgo(dateStr: string): string {
+function getTimeAgo(dateStr: string | null): string {
+  if (!dateStr) return "unknown"
   const date = new Date(dateStr)
   const now = new Date()
   const diffMs = now.getTime() - date.getTime()
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
-
   if (diffDays === 0) return "today"
   if (diffDays === 1) return "yesterday"
   if (diffDays < 7) return `${diffDays} days ago`
@@ -87,71 +110,102 @@ function getTimeAgo(dateStr: string): string {
   return `${Math.floor(diffDays / 30)} months ago`
 }
 
+const sortOptions = [
+  { value: "contribution_score", label: "Health Score" },
+  { value: "stars", label: "Stars" },
+  { value: "responsiveness", label: "Responsiveness" },
+  { value: "throughput", label: "Throughput" },
+  { value: "acceptance", label: "Acceptance" },
+  { value: "newcomer", label: "Newcomer Friendly" },
+  { value: "liveness", label: "Liveness" },
+  { value: "merge_velocity", label: "Merge Velocity" },
+]
+
 interface TrendingReposProps {
   initialRepos: TrendingRepo[]
-  initialPageInfo?: {
-    hasNextPage: boolean
-    endCursor: string | null
-  }
+  initialTotal: number
 }
 
-export function TrendingRepos({ initialRepos, initialPageInfo }: TrendingReposProps) {
+export function TrendingRepos({ initialRepos, initialTotal }: TrendingReposProps) {
   const [repos, setRepos] = useState<TrendingRepo[]>(initialRepos)
   const [selectedLanguage, setSelectedLanguage] = useState<string>("all")
+  const [sortBy, setSortBy] = useState<string>("contribution_score")
+  const [searchQuery, setSearchQuery] = useState<string>("")
   const [isLoading, setIsLoading] = useState(false)
-  const [hasMore, setHasMore] = useState(initialPageInfo?.hasNextPage ?? true)
-  const [cursor, setCursor] = useState<string | null>(initialPageInfo?.endCursor ?? null)
-  const [error, setError] = useState<string | null>(null)
+  const [total, setTotal] = useState(initialTotal)
+  const [offset, setOffset] = useState(initialRepos.length)
+  const [hasMore, setHasMore] = useState(initialRepos.length < initialTotal)
   const loadMoreRef = useRef<HTMLDivElement>(null)
 
-  // Build language options from all loaded repos
   const languageOptions = [
     { value: "all", label: "All" },
-    ...Array.from(new Set(repos.map((r) => r.language)))
-      .filter((lang) => lang !== "Unknown")
+    ...Array.from(new Set(repos.map((r) => r.language).filter(Boolean)))
       .sort()
-      .map((lang) => ({ value: lang, label: lang })),
+      .map((lang) => ({ value: lang!, label: lang! })),
   ]
 
-  const loadMore = useCallback(async () => {
-    if (isLoading || !hasMore) return
-
+  const fetchRepos = useCallback(async (offsetVal: number, language: string, sort: string, search: string, append: boolean) => {
     setIsLoading(true)
-    setError(null)
-
     try {
-      const url = cursor
-        ? `/api/github/repos?cursor=${encodeURIComponent(cursor)}`
-        : "/api/github/repos"
+      const params = new URLSearchParams({
+        offset: offsetVal.toString(),
+        limit: "30",
+        sort,
+      })
+      if (language !== "all") params.set("language", language)
+      if (search) params.set("search", search)
 
-      const response = await fetch(url)
-
-      if (!response.ok) {
-        throw new Error("Failed to fetch repositories")
-      }
+      const response = await fetch(`/api/github/repos?${params}`)
+      if (!response.ok) throw new Error("Failed to fetch repositories")
 
       const data: ReposResponse = await response.json()
 
-      if (data.repos && data.repos.length > 0) {
+      if (append) {
         setRepos((prev) => {
-          // Deduplicate by fullName
           const existing = new Set(prev.map((r) => r.fullName))
           const newRepos = data.repos.filter((r) => !existing.has(r.fullName))
           return [...prev, ...newRepos]
         })
+      } else {
+        setRepos(data.repos)
       }
 
-      setHasMore(data.pageInfo?.hasNextPage ?? false)
-      setCursor(data.pageInfo?.endCursor ?? null)
+      setTotal(data.total)
+      setHasMore(data.hasMore)
+      setOffset(offsetVal + data.repos.length)
     } catch (err) {
-      console.error("Error loading more repos:", err)
-      setError("Failed to load more repositories")
+      console.error("Error loading repos:", err)
     } finally {
       setIsLoading(false)
     }
-  }, [cursor, hasMore, isLoading])
+  }, [])
 
-  // Intersection Observer for infinite scroll
+  const handleSortChange = useCallback((value: string) => {
+    setSortBy(value)
+    setOffset(0)
+    setHasMore(true)
+    fetchRepos(0, selectedLanguage, value, searchQuery, false)
+  }, [selectedLanguage, searchQuery, fetchRepos])
+
+  const handleLanguageChange = useCallback((value: string) => {
+    setSelectedLanguage(value)
+    setOffset(0)
+    setHasMore(true)
+    fetchRepos(0, value, sortBy, searchQuery, false)
+  }, [sortBy, searchQuery, fetchRepos])
+
+  const handleSearch = useCallback((e: React.FormEvent) => {
+    e.preventDefault()
+    setOffset(0)
+    setHasMore(true)
+    fetchRepos(0, selectedLanguage, sortBy, searchQuery, false)
+  }, [selectedLanguage, sortBy, searchQuery, fetchRepos])
+
+  const loadMore = useCallback(() => {
+    if (isLoading || !hasMore) return
+    fetchRepos(offset, selectedLanguage, sortBy, searchQuery, true)
+  }, [offset, isLoading, hasMore, selectedLanguage, sortBy, searchQuery, fetchRepos])
+
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
@@ -174,93 +228,90 @@ export function TrendingRepos({ initialRepos, initialPageInfo }: TrendingReposPr
     }
   }, [hasMore, isLoading, loadMore])
 
-  const filteredRepos = repos.filter((repo) => {
-    return selectedLanguage === "all" || repo.language === selectedLanguage
-  })
-
   return (
     <section>
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-xl font-bold text-highlight">
-          Trending Repositories
+          Repository Health
         </h2>
         <span className="text-sm text-muted-foreground">
-          New repos from the last 30 days · {repos.length} loaded
+          {total} repositories ranked by health score
         </span>
       </div>
 
-      <div className="flex flex-wrap gap-3 mb-6">
+      <div className="flex flex-wrap gap-3 mb-4">
+        <Dropdown
+          label="Sort"
+          value={sortBy}
+          options={sortOptions}
+          onChange={handleSortChange}
+        />
         <Dropdown
           label="Language"
           value={selectedLanguage}
           options={languageOptions}
-          onChange={(v) => setSelectedLanguage(v)}
+          onChange={handleLanguageChange}
         />
+        <form onSubmit={handleSearch} className="flex-1 min-w-[200px] max-w-sm relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search repos..."
+            className="w-full border-2 border-foreground pl-8 pr-3 py-1 text-sm bg-background focus:outline-none focus:bg-foreground focus:text-background"
+          />
+        </form>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredRepos.map((repo) => (
-          <a
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {repos.map((repo) => (
+          <Link
             key={repo.fullName}
-            href={repo.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="border-2 border-foreground p-4 cursor-pointer flex flex-col group hover:bg-foreground/[0.03]"
+            href={`/repos/${repo.owner}/${repo.name}`}
+            className="border-2 border-foreground px-4 py-5 flex flex-col group hover:bg-foreground/[0.03]"
           >
-            <div className="flex items-start gap-3 mb-3">
+            <div className="flex items-start gap-3 mb-2">
               <div
                 className="w-3 h-3 rounded-full mt-1.5 shrink-0"
-                style={{ backgroundColor: repo.languageColor }}
+                style={{ backgroundColor: getLanguageColor(repo.language) }}
               />
               <div className="flex-1 min-w-0">
-                <div className="font-bold text-sm break-all group-hover:underline text-highlight flex items-center gap-1">
+                <div className="font-bold text-sm break-all group-hover:underline text-highlight">
                   {repo.fullName}
-                  <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100" />
                 </div>
                 <span className="text-xs text-muted-foreground">
-                  {repo.language} · Created {getTimeAgo(repo.createdAt)}
+                  {repo.language || "Unknown"} · {formatStars(repo.stars)} stars · Pushed {getTimeAgo(repo.pushedAt)}
                 </span>
               </div>
             </div>
 
-            <p className="text-sm mb-3 line-clamp-2 flex-1">
-              {repo.description}
+            <p className="text-sm mb-3 line-clamp-2 ml-6 min-h-[2.5rem]">
+              {repo.description || "\u00A0"}
             </p>
 
-            {repo.topics.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mb-3">
-                {repo.topics.slice(0, 4).map((topic) => (
-                  <span
-                    key={topic}
-                    className="border border-foreground px-1.5 py-0.5 text-xs"
-                  >
-                    {topic}
-                  </span>
-                ))}
-              </div>
-            )}
-
-            <div className="flex items-center gap-4 text-sm mt-auto text-muted-foreground">
+            <div className="flex items-center gap-4 text-xs text-muted-foreground mt-auto ml-6">
               <span className="flex items-center gap-1">
-                <Star className="w-3.5 h-3.5" />
+                <Star className="w-3 h-3" />
                 {formatStars(repo.stars)}
               </span>
-              <span className="flex items-center gap-1">
-                <GitFork className="w-3.5 h-3.5" />
-                {repo.forks.toLocaleString()}
-              </span>
+              {repo.forks !== null && (
+                <span className="flex items-center gap-1">
+                  <GitFork className="w-3 h-3" />
+                  {repo.forks.toLocaleString()}
+                </span>
+              )}
             </div>
-          </a>
+          </Link>
         ))}
       </div>
 
-      {filteredRepos.length === 0 && !isLoading && (
+      {repos.length === 0 && !isLoading && (
         <div className="border-2 border-dashed border-foreground/50 p-8 text-center">
           <p>No repositories match the selected filters.</p>
         </div>
       )}
 
-      {/* Infinite scroll trigger */}
       <div ref={loadMoreRef} className="py-8 flex justify-center">
         {isLoading && (
           <div className="flex items-center gap-2 text-muted-foreground">
@@ -268,20 +319,9 @@ export function TrendingRepos({ initialRepos, initialPageInfo }: TrendingReposPr
             <span>Loading more repositories...</span>
           </div>
         )}
-        {error && (
-          <div className="text-red-500">
-            {error}
-            <button
-              onClick={loadMore}
-              className="ml-2 underline hover:no-underline"
-            >
-              Retry
-            </button>
-          </div>
-        )}
         {!hasMore && repos.length > 0 && !isLoading && (
           <span className="text-muted-foreground text-sm">
-            No more repositories to load
+            All {total} repositories loaded
           </span>
         )}
       </div>

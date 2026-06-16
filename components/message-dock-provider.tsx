@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react"
-import { useAuth } from "./auth-provider"
+import { useSession } from "next-auth/react"
 import { MessageChatDock } from "./message-chat-dock"
 
 type MessageDockContextValue = {
@@ -16,16 +16,17 @@ type MessageDockContextValue = {
 const MessageDockContext = createContext<MessageDockContextValue | undefined>(undefined)
 
 export function MessageDockProvider({ children }: { children: ReactNode }) {
-  const { session } = useAuth()
+  const { data: session } = useSession()
+  const selfUsername = session?.user?.githubUsername ?? null
   const [peerUsername, setPeerUsername] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
 
   useEffect(() => {
-    if (!session) {
+    if (!selfUsername) {
       setOpen(false)
       setPeerUsername(null)
     }
-  }, [session])
+  }, [selfUsername])
 
   const openInbox = useCallback(() => {
     setPeerUsername(null)
@@ -53,14 +54,14 @@ export function MessageDockProvider({ children }: { children: ReactNode }) {
   return (
     <MessageDockContext.Provider value={value}>
       {children}
-      {open && session ? (
+      {open && selfUsername ? (
         <MessageChatDock
           open={open}
           onClose={closeMessageDock}
           peerUsername={peerUsername}
           onOpenPeer={setPeerUsername}
           onBackToInbox={() => setPeerUsername(null)}
-          selfUsername={session.username}
+          selfUsername={selfUsername}
         />
       ) : null}
     </MessageDockContext.Provider>

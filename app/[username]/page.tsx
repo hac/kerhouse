@@ -65,6 +65,43 @@ export default async function UserProfilePage({
     console.error("Failed to parse skills", e)
   }
 
+  // Fallback: when unique_skills is empty (the analysis job never synced this
+  // user), derive skill tags from the repo metadata that does exist — the
+  // primary language and GitHub topics of the user's scored repos, joined via
+  // user_repo_scores. unique_skills is itself just a list of lowercased
+  // repo topics/languages, so this mirrors how it would have been populated.
+  if (skills.length === 0) {
+    try {
+      const tagRows = await sql`
+        SELECT gr.primary_language, gr.topics
+        FROM user_repo_scores urs
+        JOIN github_repos gr ON gr.full_name = urs.repo_name
+        WHERE urs.username = ${username}
+        ORDER BY urs.repo_score DESC NULLS LAST
+        LIMIT 30
+      `
+      const seen = new Set<string>()
+      const derived: string[] = []
+      const add = (raw: unknown) => {
+        if (typeof raw !== "string") return
+        const tag = raw.toLowerCase().trim()
+        if (tag && !seen.has(tag)) {
+          seen.add(tag)
+          derived.push(tag)
+        }
+      }
+      // Primary languages first (stronger signal -> shown under "Strong in"),
+      // then repo topics.
+      for (const row of tagRows) add(row.primary_language)
+      for (const row of tagRows) {
+        if (Array.isArray(row.topics)) row.topics.forEach(add)
+      }
+      skills = derived.slice(0, 12)
+    } catch (e) {
+      console.error("Failed to derive fallback skills from github_repos", e)
+    }
+  }
+
   // Split skills into strong and also
   const skillsStrong = skills.slice(0, 3)
   const skillsAlso = skills.slice(3)
@@ -91,9 +128,12 @@ export default async function UserProfilePage({
   // JSONB columns may be returned as already-parsed objects by Neon
   interface RepoData {
     full_name?: string
+    fullName?: string
     ownerLogin?: string
+    owner?: string
     name?: string
     userPRs?: number
+    prs?: number
     stars?: number
     language?: string
     score?: number
@@ -106,8 +146,23 @@ export default async function UserProfilePage({
         : dbData.top_repos_json
       if (Array.isArray(repos)) {
         contributions = repos.map((r: RepoData) => {
-          const repoName = r.full_name || (r.ownerLogin ? `${r.ownerLogin}/${r.name}` : r.name || '')
-          const prCount = r.userPRs || 0
+          // Resolve a full "owner/repo" slug from the many field-name variants
+          // that appear across data sources. Fall back to the profile's own
+          // username as the owner when only a bare repo name is available, so
+          // GitHub links always point at a real repository.
+          const ownerLogin = r.ownerLogin || r.owner
+          const fullName = r.full_name || r.fullName
+          let repoName = ""
+          if (fullName && fullName.includes("/")) {
+            repoName = fullName
+          } else if (ownerLogin && r.name) {
+            repoName = `${ownerLogin}/${r.name}`
+          } else if (r.name) {
+            repoName = `${username}/${r.name}`
+          } else if (fullName) {
+            repoName = fullName
+          }
+          const prCount = r.userPRs ?? r.prs ?? 0
           const stars = r.stars || 0
 
           return {
@@ -122,6 +177,45 @@ export default async function UserProfilePage({
     }
   } catch (e) {
     console.error("Failed to parse top repos", e)
+  }
+
+  // Fallback: when the analysis row has no repo list (analyses.top_repos_json
+  // is empty/missing, as it is for many users whose analysis job never synced),
+  // build the contributions list from user_repo_scores instead — the same
+  // source family the total_score is derived from. github_repos is joined for
+  // fresh star counts and the primary language.
+  if (!contributions || contributions.length === 0) {
+    try {
+      const repoRows = await sql`
+        SELECT
+          urs.repo_name,
+          urs.user_prs,
+          COALESCE(gr.stars, urs.stars, 0) AS stars,
+          gr.primary_language,
+          urs.repo_score
+        FROM user_repo_scores urs
+        LEFT JOIN github_repos gr ON gr.full_name = urs.repo_name
+        WHERE urs.username = ${username}
+        ORDER BY urs.repo_score DESC NULLS LAST
+        LIMIT 20
+      `
+      if (repoRows.length > 0) {
+        contributions = repoRows.map((r) => {
+          const prCount = Number(r.user_prs) || 0
+          const stars = Number(r.stars) || 0
+          return {
+            kind: "commit",
+            // urs.repo_name is already an "owner/repo" slug.
+            repo: r.repo_name as string,
+            title: `${prCount} PR${prCount !== 1 ? "s" : ""} contributed · ${stars.toLocaleString()} stars`,
+            time: (r.primary_language as string) || "Recent",
+            score: r.repo_score != null ? Number(r.repo_score) : undefined,
+          }
+        })
+      }
+    } catch (e) {
+      console.error("Failed to load fallback repos from user_repo_scores", e)
+    }
   }
 
   const dev = {

@@ -1,169 +1,168 @@
 import { NextResponse } from "next/server"
+import { neon } from "@neondatabase/serverless"
 
-interface GitHubRepo {
-  name: string
-  nameWithOwner: string
-  description: string | null
-  stargazerCount: number
-  forkCount: number
-  url: string
-  primaryLanguage: {
-    name: string
-    color: string
-  } | null
-  repositoryTopics: {
-    nodes: Array<{
-      topic: {
-        name: string
-      }
-    }>
-  }
-  createdAt: string
-  updatedAt: string
-}
-
-interface GraphQLResponse {
-  data?: {
-    search: {
-      nodes: GitHubRepo[]
-      pageInfo: {
-        hasNextPage: boolean
-        endCursor: string | null
-      }
-    }
-  }
-  errors?: Array<{ message: string }>
-}
+const sql = neon(process.env.DATABASE_URL!)
 
 export interface TrendingRepo {
   name: string
   fullName: string
-  description: string
+  owner: string
   stars: number
-  forks: number
+  forks: number | null
+  language: string | null
+  description: string | null
   url: string
-  language: string
-  languageColor: string
-  topics: string[]
-  createdAt: string
+  contributionScore: number
+  responsivenessScore: number | null
+  throughputScore: number | null
+  acceptanceScore: number | null
+  newcomerScore: number | null
+  livenessScore: number | null
+  confidence: number | null
+  mergedPrCount: number | null
+  medianMergeHours: number | null
+  acceptanceRate: number | null
+  openIssuesCount: number | null
+  goodFirstIssues: number | null
+  helpWantedIssues: number | null
+  hasContributing: boolean | null
+  hasCodeOfConduct: boolean | null
+  mentionableUsers: number | null
+  isArchived: boolean | null
+  pushedAt: string | null
+  lastReleaseAt: string | null
+  mergeVelocityPerMonth: number | null
+  gatedReason: string | null
 }
 
 export interface ReposResponse {
   repos: TrendingRepo[]
-  pageInfo: {
-    hasNextPage: boolean
-    endCursor: string | null
-  }
-}
-
-async function fetchTrendingRepos(cursor?: string | null): Promise<ReposResponse> {
-  const token = process.env.GITHUB_TOKEN
-
-  if (!token) {
-    console.error("GITHUB_TOKEN is not set")
-    return { repos: [], pageInfo: { hasNextPage: false, endCursor: null } }
-  }
-
-  // Get repos created in the last 30 days, sorted by stars
-  const thirtyDaysAgo = new Date()
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
-  const dateStr = thirtyDaysAgo.toISOString().split("T")[0]
-
-  const afterClause = cursor ? `, after: "${cursor}"` : ""
-
-  const query = `
-    query {
-      search(query: "created:>${dateStr} stars:>100 sort:stars-desc", type: REPOSITORY, first: 30${afterClause}) {
-        nodes {
-          ... on Repository {
-            name
-            nameWithOwner
-            description
-            stargazerCount
-            forkCount
-            url
-            primaryLanguage {
-              name
-              color
-            }
-            repositoryTopics(first: 5) {
-              nodes {
-                topic {
-                  name
-                }
-              }
-            }
-            createdAt
-            updatedAt
-          }
-        }
-        pageInfo {
-          hasNextPage
-          endCursor
-        }
-      }
-    }
-  `
-
-  try {
-    const response = await fetch("https://api.github.com/graphql", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ query }),
-    })
-
-    if (!response.ok) {
-      console.error("GitHub API error:", response.status, response.statusText)
-      return { repos: [], pageInfo: { hasNextPage: false, endCursor: null } }
-    }
-
-    const result: GraphQLResponse = await response.json()
-
-    if (result.errors) {
-      console.error("GitHub GraphQL errors:", result.errors)
-      return { repos: [], pageInfo: { hasNextPage: false, endCursor: null } }
-    }
-
-    if (!result.data?.search?.nodes) {
-      return { repos: [], pageInfo: { hasNextPage: false, endCursor: null } }
-    }
-
-    // Filter out null entries and map to our format
-    const repos: TrendingRepo[] = result.data.search.nodes
-      .filter((repo): repo is GitHubRepo => repo !== null && repo.name !== undefined)
-      .map((repo) => ({
-        name: repo.name,
-        fullName: repo.nameWithOwner,
-        description: repo.description || "No description available",
-        stars: repo.stargazerCount,
-        forks: repo.forkCount,
-        url: repo.url,
-        language: repo.primaryLanguage?.name || "Unknown",
-        languageColor: repo.primaryLanguage?.color || "#6e7681",
-        topics: repo.repositoryTopics.nodes.map((t) => t.topic.name),
-        createdAt: repo.createdAt,
-      }))
-
-    return {
-      repos,
-      pageInfo: result.data.search.pageInfo,
-    }
-  } catch (error) {
-    console.error("Error fetching trending repos:", error)
-    return { repos: [], pageInfo: { hasNextPage: false, endCursor: null } }
-  }
+  hasMore: boolean
+  total: number
 }
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
-    const cursor = searchParams.get("cursor")
+    const offset = parseInt(searchParams.get("offset") || "0", 10)
+    const limit = parseInt(searchParams.get("limit") || "30", 10)
+    const language = searchParams.get("language") || null
+    const sort = searchParams.get("sort") || "contribution_score"
+    const search = searchParams.get("search") || null
 
-    const result = await fetchTrendingRepos(cursor)
-    return NextResponse.json(result)
+    const allowedSorts: Record<string, string> = {
+      contribution_score: "rh.contribution_score",
+      stars: "rh.stars",
+      responsiveness: "rh.responsiveness_score",
+      throughput: "rh.throughput_score",
+      acceptance: "rh.acceptance_score",
+      newcomer: "rh.newcomer_score",
+      liveness: "rh.liveness_score",
+      merge_velocity: "rh.merge_velocity_per_month",
+    }
+    const orderBy = allowedSorts[sort] || "rh.contribution_score"
+
+    const conditions: string[] = ["rh.gated_reason IS NULL"]
+    const params: (string | number)[] = []
+    let paramIdx = 1
+
+    if (language && language !== "all") {
+      conditions.push(`rh.primary_language = $${paramIdx}`)
+      params.push(language)
+      paramIdx++
+    }
+
+    if (search) {
+      conditions.push(`rh.full_name ILIKE $${paramIdx}`)
+      params.push(`%${search}%`)
+      paramIdx++
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : ""
+
+    const countResult = await sql.query(
+      `SELECT count(*) FROM repo_health rh ${whereClause}`,
+      params
+    )
+    const total = parseInt(countResult[0].count, 10)
+
+    params.push(limit)
+    params.push(offset)
+
+    const rows = await sql.query(
+      `SELECT
+        rh.full_name,
+        rh.owner_login,
+        rh.repo_name,
+        rh.primary_language,
+        rh.stars,
+        gr.forks,
+        gr.description,
+        rh.is_archived,
+        rh.pushed_at,
+        rh.last_release_at,
+        rh.merged_pr_count,
+        rh.median_merge_hours,
+        rh.acceptance_rate,
+        rh.merge_velocity_per_month,
+        rh.open_issues_count,
+        rh.good_first_issues,
+        rh.help_wanted_issues,
+        rh.has_contributing,
+        rh.has_code_of_conduct,
+        rh.mentionable_users,
+        rh.contribution_score,
+        rh.responsiveness_score,
+        rh.throughput_score,
+        rh.acceptance_score,
+        rh.newcomer_score,
+        rh.liveness_score,
+        rh.confidence,
+        rh.gated_reason
+      FROM repo_health rh
+      LEFT JOIN github_repos gr ON gr.full_name = rh.full_name
+      ${whereClause}
+      ORDER BY ${orderBy} DESC NULLS LAST
+      LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
+      params
+    )
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const repos: TrendingRepo[] = rows.map((row: any) => ({
+      name: row.repo_name,
+      fullName: row.full_name,
+      owner: row.owner_login,
+      stars: row.stars,
+      forks: row.forks,
+      language: row.primary_language,
+      description: row.description,
+      url: `https://github.com/${row.full_name}`,
+      contributionScore: row.contribution_score,
+      responsivenessScore: row.responsiveness_score,
+      throughputScore: row.throughput_score,
+      acceptanceScore: row.acceptance_score,
+      newcomerScore: row.newcomer_score,
+      livenessScore: row.liveness_score,
+      confidence: row.confidence,
+      mergedPrCount: row.merged_pr_count,
+      medianMergeHours: row.median_merge_hours,
+      acceptanceRate: row.acceptance_rate,
+      openIssuesCount: row.open_issues_count,
+      goodFirstIssues: row.good_first_issues,
+      helpWantedIssues: row.help_wanted_issues,
+      hasContributing: row.has_contributing,
+      hasCodeOfConduct: row.has_code_of_conduct,
+      mentionableUsers: row.mentionable_users,
+      isArchived: row.is_archived,
+      pushedAt: row.pushed_at,
+      lastReleaseAt: row.last_release_at,
+      mergeVelocityPerMonth: row.merge_velocity_per_month,
+      gatedReason: row.gated_reason,
+    }))
+
+    const hasMore = offset + limit < total
+
+    return NextResponse.json({ repos, hasMore, total })
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error"
     console.error("Trending repos fetch error:", errorMessage)

@@ -2,172 +2,103 @@ import { Header } from "@/components/header"
 import { TrendingRepos } from "@/components/trending-repos"
 import { buildPageMetadata } from "@/lib/seo"
 import type { TrendingRepo } from "@/app/api/github/repos/route"
+import { neon } from "@neondatabase/serverless"
 
 export const metadata = buildPageMetadata({
   title: "Repositories",
-  description: "Discover trending open source repositories and projects.",
+  description: "Discover open source repositories ranked by contribution health scores.",
   path: "/repos",
 })
 
-// Force dynamic rendering to ensure fresh data on each request
 export const dynamic = 'force-dynamic'
 
-interface GitHubRepo {
-  name: string
-  nameWithOwner: string
-  description: string | null
-  stargazerCount: number
-  forkCount: number
-  url: string
-  primaryLanguage: {
-    name: string
-    color: string
-  } | null
-  repositoryTopics: {
-    nodes: Array<{
-      topic: {
-        name: string
-      }
-    }>
-  }
-  createdAt: string
-}
+async function getInitialRepos(): Promise<{ repos: TrendingRepo[]; total: number }> {
+  const sql = neon(process.env.DATABASE_URL!)
 
-interface GraphQLResponse {
-  data?: {
-    search: {
-      nodes: GitHubRepo[]
-      pageInfo: {
-        hasNextPage: boolean
-        endCursor: string | null
-      }
-    }
-  }
-  errors?: Array<{ message: string }>
-}
+  const countResult = await sql`SELECT count(*) FROM repo_health WHERE gated_reason IS NULL`
+  const total = parseInt(countResult[0].count, 10)
 
-interface FetchResult {
-  repos: TrendingRepo[]
-  pageInfo: {
-    hasNextPage: boolean
-    endCursor: string | null
-  }
-}
-
-async function fetchTrendingRepos(): Promise<FetchResult> {
-  const token = process.env.GITHUB_TOKEN
-
-  if (!token) {
-    console.error("GITHUB_TOKEN is not set. Available env vars:", Object.keys(process.env).filter(k => k.includes('GITHUB') || k.includes('TOKEN')))
-    return { repos: [], pageInfo: { hasNextPage: false, endCursor: null } }
-  }
-
-  console.log("Fetching trending repos with token starting with:", token.substring(0, 10) + "...")
-
-  // Get repos created in the last 30 days, sorted by stars
-  const thirtyDaysAgo = new Date()
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
-  const dateStr = thirtyDaysAgo.toISOString().split("T")[0]
-
-  const query = `
-    query {
-      search(query: "created:>${dateStr} stars:>100 sort:stars-desc", type: REPOSITORY, first: 30) {
-        nodes {
-          ... on Repository {
-            name
-            nameWithOwner
-            description
-            stargazerCount
-            forkCount
-            url
-            primaryLanguage {
-              name
-              color
-            }
-            repositoryTopics(first: 5) {
-              nodes {
-                topic {
-                  name
-                }
-              }
-            }
-            createdAt
-          }
-        }
-        pageInfo {
-          hasNextPage
-          endCursor
-        }
-      }
-    }
+  const rows = await sql`
+    SELECT
+      rh.full_name,
+      rh.owner_login,
+      rh.repo_name,
+      rh.primary_language,
+      rh.stars,
+      gr.forks,
+      gr.description,
+      rh.is_archived,
+      rh.pushed_at,
+      rh.last_release_at,
+      rh.merged_pr_count,
+      rh.median_merge_hours,
+      rh.acceptance_rate,
+      rh.merge_velocity_per_month,
+      rh.open_issues_count,
+      rh.good_first_issues,
+      rh.help_wanted_issues,
+      rh.has_contributing,
+      rh.has_code_of_conduct,
+      rh.mentionable_users,
+      rh.contribution_score,
+      rh.responsiveness_score,
+      rh.throughput_score,
+      rh.acceptance_score,
+      rh.newcomer_score,
+      rh.liveness_score,
+      rh.confidence,
+      rh.gated_reason
+    FROM repo_health rh
+    LEFT JOIN github_repos gr ON gr.full_name = rh.full_name
+    WHERE rh.gated_reason IS NULL
+    ORDER BY rh.contribution_score DESC NULLS LAST
+    LIMIT 30
   `
 
-  try {
-    const response = await fetch("https://api.github.com/graphql", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ query }),
-      next: { revalidate: 300 }, // Cache for 5 minutes
-    })
+  const repos: TrendingRepo[] = rows.map((row) => ({
+    name: row.repo_name,
+    fullName: row.full_name,
+    owner: row.owner_login,
+    stars: row.stars,
+    forks: row.forks,
+    language: row.primary_language,
+    description: row.description,
+    url: `https://github.com/${row.full_name}`,
+    contributionScore: row.contribution_score,
+    responsivenessScore: row.responsiveness_score,
+    throughputScore: row.throughput_score,
+    acceptanceScore: row.acceptance_score,
+    newcomerScore: row.newcomer_score,
+    livenessScore: row.liveness_score,
+    confidence: row.confidence,
+    mergedPrCount: row.merged_pr_count,
+    medianMergeHours: row.median_merge_hours,
+    acceptanceRate: row.acceptance_rate,
+    openIssuesCount: row.open_issues_count,
+    goodFirstIssues: row.good_first_issues,
+    helpWantedIssues: row.help_wanted_issues,
+    hasContributing: row.has_contributing,
+    hasCodeOfConduct: row.has_code_of_conduct,
+    mentionableUsers: row.mentionable_users,
+    isArchived: row.is_archived,
+    pushedAt: row.pushed_at,
+    lastReleaseAt: row.last_release_at,
+    mergeVelocityPerMonth: row.merge_velocity_per_month,
+    gatedReason: row.gated_reason,
+  }))
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error("GitHub API error:", response.status, response.statusText, errorText)
-      return { repos: [], pageInfo: { hasNextPage: false, endCursor: null } }
-    }
-
-    const result: GraphQLResponse = await response.json()
-    console.log("GitHub API response received, nodes count:", result.data?.search?.nodes?.length ?? 0)
-
-    if (result.errors) {
-      console.error("GitHub GraphQL errors:", result.errors)
-      return { repos: [], pageInfo: { hasNextPage: false, endCursor: null } }
-    }
-
-    if (!result.data?.search?.nodes) {
-      console.error("No search nodes in response:", JSON.stringify(result).substring(0, 200))
-      return { repos: [], pageInfo: { hasNextPage: false, endCursor: null } }
-    }
-
-    // Filter out null entries and map to our format
-    const repos: TrendingRepo[] = result.data.search.nodes
-      .filter((repo): repo is GitHubRepo => repo !== null && repo.name !== undefined)
-      .map((repo) => ({
-        name: repo.name,
-        fullName: repo.nameWithOwner,
-        description: repo.description || "No description available",
-        stars: repo.stargazerCount,
-        forks: repo.forkCount,
-        url: repo.url,
-        language: repo.primaryLanguage?.name || "Unknown",
-        languageColor: repo.primaryLanguage?.color || "#6e7681",
-        topics: repo.repositoryTopics.nodes.map((t) => t.topic.name),
-        createdAt: repo.createdAt,
-      }))
-
-    return {
-      repos,
-      pageInfo: result.data.search.pageInfo,
-    }
-  } catch (error) {
-    console.error("Error fetching trending repos:", error)
-    return { repos: [], pageInfo: { hasNextPage: false, endCursor: null } }
-  }
+  return { repos, total }
 }
 
 export default async function ReposPage() {
-  // Fetch initial data - Next.js handles caching via revalidate
-  const { repos, pageInfo } = await fetchTrendingRepos()
+  const { repos, total } = await getInitialRepos()
 
   return (
     <div className="min-h-screen">
       <Header />
 
       <main className="layout-container py-8">
-        <TrendingRepos initialRepos={repos} initialPageInfo={pageInfo} />
+        <TrendingRepos initialRepos={repos} initialTotal={total} />
       </main>
 
       <footer className="border-t-2 border-dashed border-foreground/70 py-6">

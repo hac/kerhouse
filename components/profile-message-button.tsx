@@ -2,22 +2,24 @@
 
 import Link from "next/link"
 import { MessageCircle } from "lucide-react"
-import { useAuth } from "./auth-provider"
+import { useSession } from "next-auth/react"
 import { useMessageDock } from "./message-dock-provider"
 
 export function ProfileMessageSidebar({ targetUsername }: { targetUsername: string }) {
-  const { session, ready } = useAuth()
+  const { data: session, status } = useSession()
   const { openMessageDock } = useMessageDock()
 
-  const canDm = ready && session && session.username !== targetUsername
+  const selfUsername = session?.user?.githubUsername
+  const ready = status !== "loading"
+  const canDm = ready && selfUsername && selfUsername !== targetUsername
 
-  if (!canDm || !session) return null
+  if (!canDm || !selfUsername) return null
 
   return (
     <section className="border-2 border-dashed border-foreground/70 p-5">
       <h2 className="text-sm font-bold mb-2">Message</h2>
       <p className="text-xs text-muted-foreground mb-4 leading-relaxed">
-        Send a direct message as <span className="font-mono text-foreground">{session.username}</span>.
+        Send a direct message as <span className="font-mono text-foreground">{selfUsername}</span>.
       </p>
       <Link
         href={`/${targetUsername}`}

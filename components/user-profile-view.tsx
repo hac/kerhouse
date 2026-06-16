@@ -1,9 +1,8 @@
 import Link from "next/link"
 import type { LucideIcon } from "lucide-react"
-import { Eye, GitCommit, GitPullRequest, MapPin, MessageSquare, User } from "lucide-react"
+import { Eye, Github, GitCommit, GitPullRequest, MapPin, MessageSquare, User } from "lucide-react"
 import type { Developer } from "@/lib/data"
 import type { ContributionKind } from "@/lib/profile-prototype"
-import { prototypeContributions } from "@/lib/profile-prototype"
 import { ProfileMessageSidebar } from "@/components/profile-message-button"
 
 const contributionIcon: Record<ContributionKind, LucideIcon> = {
@@ -57,9 +56,9 @@ export function UserProfileView({
   bio, 
   weeklyRank, 
   weeklyScore, 
-  skillsStrong = [], 
+  skillsStrong = [],
   skillsAlso = [],
-  contributions = [...prototypeContributions],
+  contributions = [],
   scores
 }: UserProfileViewProps) {
   return (
@@ -84,6 +83,15 @@ export function UserProfileView({
                     {dev.country}
                   </span>
                   <span>Primary stack: {dev.language}</span>
+                  <a
+                    href={`https://github.com/${dev.username}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 hover:text-highlight hover:underline underline-offset-4"
+                  >
+                    <Github className="w-3.5 h-3.5 shrink-0" aria-hidden />
+                    GitHub profile
+                  </a>
                 </div>
                 <div className="flex flex-wrap gap-1.5 mt-4">
                   {dev.skills.map((skill) => (
@@ -204,15 +212,37 @@ export function UserProfileView({
               Contributions
             </h2>
             <div className="divide-y divide-foreground">
+              {contributions.length === 0 && (
+                <p className="px-4 sm:px-5 py-8 text-sm text-muted-foreground">
+                  No public contribution data available for{" "}
+                  <a
+                    href={`https://github.com/${dev.username}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:text-highlight hover:underline underline-offset-4"
+                  >
+                    {dev.username}
+                  </a>{" "}
+                  yet.
+                </p>
+              )}
               {contributions.map((c, i) => {
                 const kind = c.kind as ContributionKind
                 const Icon = contributionIcon[kind] || GitCommit
+                // Only link out to GitHub when we have a valid "owner/repo" slug.
+                const hasValidRepo = typeof c.repo === "string" && c.repo.includes("/")
+                const linkProps = hasValidRepo
+                  ? {
+                      href: contributionHref(c.repo),
+                      target: "_blank",
+                      rel: "noopener noreferrer",
+                    }
+                  : {}
+                const Wrapper: any = hasValidRepo ? Link : "div"
                 return (
-                  <Link
+                  <Wrapper
                     key={`${c.repo}-${c.title || i}-${i}`}
-                    href={contributionHref(c.repo)}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                    {...linkProps}
                     className="flex items-start gap-3 py-[11px] px-4 sm:px-5 hover:bg-foreground/[0.03]"
                   >
                     <div className="border border-foreground p-1.5 shrink-0 mt-0.5">
@@ -243,7 +273,7 @@ export function UserProfileView({
                         </span>
                       )}
                     </div>
-                  </Link>
+                  </Wrapper>
                 )
               })}
             </div>
