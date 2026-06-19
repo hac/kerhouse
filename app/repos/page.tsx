@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic'
 async function getInitialRepos(tag?: string): Promise<{ repos: TrendingRepo[]; total: number }> {
   const sql = neon(process.env.DATABASE_URL!)
 
-  const tagCondition = tag ? sql`AND $${tag.toLowerCase()} = ANY(gr.topics)` : sql``
+  const tagCondition = tag ? sql`AND ${tag.toLowerCase()} = ANY(gr.topics)` : sql``
 
   const countResult = await sql`SELECT count(*) FROM repo_health rh LEFT JOIN github_repos gr ON gr.full_name = rh.full_name WHERE rh.gated_reason IS NULL ${tagCondition}`
   const total = parseInt(countResult[0].count, 10)
