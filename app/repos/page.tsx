@@ -12,10 +12,12 @@ export const metadata = buildPageMetadata({
 
 export const dynamic = 'force-dynamic'
 
-async function getInitialRepos(): Promise<{ repos: TrendingRepo[]; total: number }> {
+async function getInitialRepos(tag?: string): Promise<{ repos: TrendingRepo[]; total: number }> {
   const sql = neon(process.env.DATABASE_URL!)
 
-  const countResult = await sql`SELECT count(*) FROM repo_health WHERE gated_reason IS NULL`
+  const tagCondition = tag ? sql`AND $${tag.toLowerCase()} = ANY(gr.topics)` : sql``
+
+  const countResult = await sql`SELECT count(*) FROM repo_health rh LEFT JOIN github_repos gr ON gr.full_name = rh.full_name WHERE rh.gated_reason IS NULL ${tagCondition}`
   const total = parseInt(countResult[0].count, 10)
 
   const rows = await sql`
@@ -50,7 +52,7 @@ async function getInitialRepos(): Promise<{ repos: TrendingRepo[]; total: number
       rh.gated_reason
     FROM repo_health rh
     LEFT JOIN github_repos gr ON gr.full_name = rh.full_name
-    WHERE rh.gated_reason IS NULL
+    WHERE rh.gated_reason IS NULL ${tagCondition}
     ORDER BY rh.contribution_score DESC NULLS LAST
     LIMIT 30
   `
@@ -90,15 +92,17 @@ async function getInitialRepos(): Promise<{ repos: TrendingRepo[]; total: number
   return { repos, total }
 }
 
-export default async function ReposPage() {
-  const { repos, total } = await getInitialRepos()
+export default async function ReposPage({ searchParams }: { searchParams: Promise<{ tag?: string }> }) {
+  const params = await searchParams
+  const tag = params.tag || undefined
+  const { repos, total } = await getInitialRepos(tag)
 
   return (
     <div className="min-h-screen">
       <Header />
 
       <main className="layout-container py-8">
-        <TrendingRepos initialRepos={repos} initialTotal={total} />
+        <TrendingRepos initialRepos={repos} initialTotal={total} initialTag={tag} />
       </main>
 
       <footer className="border-t-2 border-dashed border-foreground/70 py-6">
