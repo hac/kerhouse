@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react"
 import Link from "next/link"
-import { Star, ChevronDown, Loader2, Search, GitFork } from "lucide-react"
+import { Star, ChevronDown, Loader2, Search, GitFork, X } from "lucide-react"
 import type { TrendingRepo, ReposResponse } from "@/app/api/github/repos/route"
 
 const LANGUAGE_COLORS: Record<string, string> = {
@@ -124,13 +124,15 @@ const sortOptions = [
 interface TrendingReposProps {
   initialRepos: TrendingRepo[]
   initialTotal: number
+  initialTag?: string
 }
 
-export function TrendingRepos({ initialRepos, initialTotal }: TrendingReposProps) {
+export function TrendingRepos({ initialRepos, initialTotal, initialTag }: TrendingReposProps) {
   const [repos, setRepos] = useState<TrendingRepo[]>(initialRepos)
   const [selectedLanguage, setSelectedLanguage] = useState<string>("all")
   const [sortBy, setSortBy] = useState<string>("contribution_score")
   const [searchQuery, setSearchQuery] = useState<string>("")
+  const [tag, setTag] = useState<string>(initialTag || "")
   const [isLoading, setIsLoading] = useState(false)
   const [total, setTotal] = useState(initialTotal)
   const [offset, setOffset] = useState(initialRepos.length)
@@ -144,7 +146,7 @@ export function TrendingRepos({ initialRepos, initialTotal }: TrendingReposProps
       .map((lang) => ({ value: lang!, label: lang! })),
   ]
 
-  const fetchRepos = useCallback(async (offsetVal: number, language: string, sort: string, search: string, append: boolean) => {
+  const fetchRepos = useCallback(async (offsetVal: number, language: string, sort: string, search: string, activeTag: string, append: boolean) => {
     setIsLoading(true)
     try {
       const params = new URLSearchParams({
@@ -154,6 +156,7 @@ export function TrendingRepos({ initialRepos, initialTotal }: TrendingReposProps
       })
       if (language !== "all") params.set("language", language)
       if (search) params.set("search", search)
+      if (activeTag) params.set("tag", activeTag)
 
       const response = await fetch(`/api/github/repos?${params}`)
       if (!response.ok) throw new Error("Failed to fetch repositories")
@@ -184,27 +187,37 @@ export function TrendingRepos({ initialRepos, initialTotal }: TrendingReposProps
     setSortBy(value)
     setOffset(0)
     setHasMore(true)
-    fetchRepos(0, selectedLanguage, value, searchQuery, false)
-  }, [selectedLanguage, searchQuery, fetchRepos])
+    fetchRepos(0, selectedLanguage, value, searchQuery, tag, false)
+  }, [selectedLanguage, searchQuery, tag, fetchRepos])
 
   const handleLanguageChange = useCallback((value: string) => {
     setSelectedLanguage(value)
     setOffset(0)
     setHasMore(true)
-    fetchRepos(0, value, sortBy, searchQuery, false)
-  }, [sortBy, searchQuery, fetchRepos])
+    fetchRepos(0, value, sortBy, searchQuery, tag, false)
+  }, [sortBy, searchQuery, tag, fetchRepos])
 
   const handleSearch = useCallback((e: React.FormEvent) => {
     e.preventDefault()
     setOffset(0)
     setHasMore(true)
-    fetchRepos(0, selectedLanguage, sortBy, searchQuery, false)
-  }, [selectedLanguage, sortBy, searchQuery, fetchRepos])
+    fetchRepos(0, selectedLanguage, sortBy, searchQuery, tag, false)
+  }, [selectedLanguage, sortBy, searchQuery, tag, fetchRepos])
 
   const loadMore = useCallback(() => {
     if (isLoading || !hasMore) return
-    fetchRepos(offset, selectedLanguage, sortBy, searchQuery, true)
-  }, [offset, isLoading, hasMore, selectedLanguage, sortBy, searchQuery, fetchRepos])
+    fetchRepos(offset, selectedLanguage, sortBy, searchQuery, tag, true)
+  }, [offset, isLoading, hasMore, selectedLanguage, sortBy, searchQuery, tag, fetchRepos])
+
+  const clearTag = useCallback(() => {
+    setTag("")
+    setOffset(0)
+    setHasMore(true)
+    const url = new URL(window.location.href)
+    url.searchParams.delete("tag")
+    window.history.replaceState({}, "", url.toString())
+    fetchRepos(0, selectedLanguage, sortBy, searchQuery, "", false)
+  }, [selectedLanguage, sortBy, searchQuery, fetchRepos])
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -263,6 +276,23 @@ export function TrendingRepos({ initialRepos, initialTotal }: TrendingReposProps
           />
         </form>
       </div>
+
+      {tag && (
+        <div className="flex items-center gap-2 mb-4">
+          <span className="text-sm text-muted-foreground">Filtered by topic:</span>
+          <span className="border-2 border-foreground px-2 py-0.5 text-sm flex items-center gap-1.5">
+            #{tag}
+            <button
+              type="button"
+              onClick={clearTag}
+              className="hover:text-highlight"
+              aria-label="Clear tag filter"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </span>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {repos.map((repo) => (

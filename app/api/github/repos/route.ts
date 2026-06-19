@@ -49,6 +49,7 @@ export async function GET(request: Request) {
     const language = searchParams.get("language") || null
     const sort = searchParams.get("sort") || "contribution_score"
     const search = searchParams.get("search") || null
+    const tag = searchParams.get("tag") || null
 
     const allowedSorts: Record<string, string> = {
       contribution_score: "rh.contribution_score",
@@ -78,10 +79,17 @@ export async function GET(request: Request) {
       paramIdx++
     }
 
+    if (tag) {
+      conditions.push(`$${paramIdx} = ANY(gr.topics)`)
+      params.push(tag.toLowerCase())
+      paramIdx++
+    }
+
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : ""
+    const joinClause = "LEFT JOIN github_repos gr ON gr.full_name = rh.full_name"
 
     const countResult = await sql.query(
-      `SELECT count(*) FROM repo_health rh ${whereClause}`,
+      `SELECT count(*) FROM repo_health rh ${joinClause} ${whereClause}`,
       params
     )
     const total = parseInt(countResult[0].count, 10)
