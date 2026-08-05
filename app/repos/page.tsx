@@ -12,10 +12,22 @@ export const metadata = buildPageMetadata({
 
 export const dynamic = 'force-dynamic'
 
-async function getInitialRepos(tag?: string): Promise<{ repos: TrendingRepo[]; total: number }> {
+async function getInitialRepos(tag?: string, sort?: string): Promise<{ repos: TrendingRepo[]; total: number }> {
   const sql = neon(process.env.DATABASE_URL!)
 
   const tagCondition = tag ? sql`AND ${tag.toLowerCase()} = ANY(gr.topics)` : sql``
+
+  const allowedSorts: Record<string, string> = {
+    contribution_score: "rh.contribution_score DESC NULLS LAST",
+    stars: "rh.stars DESC NULLS LAST",
+    responsiveness: "rh.responsiveness_score DESC NULLS LAST",
+    throughput: "rh.throughput_score DESC NULLS LAST",
+    acceptance: "rh.acceptance_score DESC NULLS LAST",
+    newcomer: "rh.good_first_issues DESC NULLS LAST, rh.open_issues_count DESC NULLS LAST",
+    liveness: "rh.liveness_score DESC NULLS LAST",
+    merge_velocity: "rh.merge_velocity_per_month DESC NULLS LAST",
+  }
+  const orderBy = allowedSorts[sort || "contribution_score"] || "rh.contribution_score DESC NULLS LAST"
 
   const countResult = await sql`SELECT count(*) FROM repo_health rh LEFT JOIN github_repos gr ON gr.full_name = rh.full_name WHERE rh.gated_reason IS NULL ${tagCondition}`
   const total = parseInt(countResult[0].count, 10)
@@ -53,7 +65,7 @@ async function getInitialRepos(tag?: string): Promise<{ repos: TrendingRepo[]; t
     FROM repo_health rh
     LEFT JOIN github_repos gr ON gr.full_name = rh.full_name
     WHERE rh.gated_reason IS NULL ${tagCondition}
-    ORDER BY rh.contribution_score DESC NULLS LAST
+    ORDER BY ${sql.unsafe(orderBy)}
     LIMIT 30
   `
 
@@ -92,17 +104,23 @@ async function getInitialRepos(tag?: string): Promise<{ repos: TrendingRepo[]; t
   return { repos, total }
 }
 
-export default async function ReposPage({ searchParams }: { searchParams: Promise<{ tag?: string }> }) {
+export default async function ReposPage({ searchParams }: { searchParams: Promise<{ tag?: string; sort?: string }> }) {
   const params = await searchParams
   const tag = params.tag || undefined
-  const { repos, total } = await getInitialRepos(tag)
+  const sort = params.sort || undefined
+  const { repos, total } = await getInitialRepos(tag, sort)
 
   return (
     <div className="min-h-screen">
       <Header />
 
       <main className="layout-container py-8">
-        <TrendingRepos initialRepos={repos} initialTotal={total} initialTag={tag} />
+        <TrendingRepos
+          initialRepos={repos}
+          initialTotal={total}
+          initialTag={tag}
+          initialSort={sort || "contribution_score"}
+        />
       </main>
 
       <footer className="border-t-2 border-dashed border-foreground/70 py-6">
