@@ -312,7 +312,7 @@ export function TrendingRepos({ initialRepos, initialTotal, initialTag, initialS
                   {repo.fullName}
                 </div>
                 <span className="text-xs text-muted-foreground">
-                  {repo.language || "Unknown"} · {formatStars(repo.stars)} stars · Pushed {getTimeAgo(repo.pushedAt)}
+                  {repo.language || "Unknown"} · {formatStars(repo.stars)} stars · Updated {getTimeAgo(repo.pushedAt)}
                 </span>
               </div>
             </div>

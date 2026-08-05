@@ -255,7 +255,7 @@ export function RepoDetailView({ repo }: { repo: RepoDetail }) {
     { label: "Acceptance", value: repo.scores.acceptance, icon: <CheckCircle className="w-4 h-4" />, description: "How likely a submitted PR is to be merged rather than rejected, with a bonus for repos that merge work from outside contributors (not just the owners)." },
     { label: "Responsiveness", value: repo.scores.responsiveness, icon: <Clock className="w-4 h-4" />, description: "How quickly maintainers give your pull request its first review. Faster reviews rank higher." },
     { label: "Newcomer Friendly", value: repo.scores.newcomer, icon: <Sprout className="w-4 h-4" />, description: "How welcoming the repo is to first-timers: whether it flags \"good first issue\"/\"help wanted\" tickets and has a CONTRIBUTING guide and code of conduct." },
-    { label: "Liveness", value: repo.scores.liveness, icon: <Zap className="w-4 h-4" />, description: "How active the repo is right now, based on how recently it was pushed to and last released." },
+    { label: "Liveness", value: repo.scores.liveness, icon: <Zap className="w-4 h-4" />, description: "How active the repo is right now, based on how recently it was updated and last released." },
     { label: "Throughput", value: repo.scores.throughput, icon: <GitPullRequest className="w-4 h-4" />, description: "How fast and how often PRs actually get merged, knocked down a bit if there's a big backlog of open PRs waiting." },
   ]
 
