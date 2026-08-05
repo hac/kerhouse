@@ -53,16 +53,16 @@ export async function GET(request: Request) {
     const tag = searchParams.get("tag") || null
 
     const allowedSorts: Record<string, string> = {
-      contribution_score: "rh.contribution_score",
-      stars: "rh.stars",
-      responsiveness: "rh.responsiveness_score",
-      throughput: "rh.throughput_score",
-      acceptance: "rh.acceptance_score",
-      newcomer: "rh.newcomer_score",
-      liveness: "rh.liveness_score",
-      merge_velocity: "rh.merge_velocity_per_month",
+      contribution_score: "rh.contribution_score DESC NULLS LAST",
+      stars: "rh.stars DESC NULLS LAST",
+      responsiveness: "rh.responsiveness_score DESC NULLS LAST",
+      throughput: "rh.throughput_score DESC NULLS LAST",
+      acceptance: "rh.acceptance_score DESC NULLS LAST",
+      newcomer: "rh.good_first_issues DESC NULLS LAST, rh.open_issues_count DESC NULLS LAST",
+      liveness: "rh.liveness_score DESC NULLS LAST",
+      merge_velocity: "rh.merge_velocity_per_month DESC NULLS LAST",
     }
-    const orderBy = allowedSorts[sort] || "rh.contribution_score"
+    const orderBy = allowedSorts[sort] || "rh.contribution_score DESC NULLS LAST"
 
     const conditions: string[] = ["rh.gated_reason IS NULL"]
     const params: (string | number)[] = []
@@ -131,7 +131,7 @@ export async function GET(request: Request) {
       FROM repo_health rh
       LEFT JOIN github_repos gr ON gr.full_name = rh.full_name
       ${whereClause}
-      ORDER BY ${orderBy} DESC NULLS LAST
+      ORDER BY ${orderBy}
       LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
       params
     )

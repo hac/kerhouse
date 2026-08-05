@@ -125,12 +125,13 @@ interface TrendingReposProps {
   initialRepos: TrendingRepo[]
   initialTotal: number
   initialTag?: string
+  initialSort?: string
 }
 
-export function TrendingRepos({ initialRepos, initialTotal, initialTag }: TrendingReposProps) {
+export function TrendingRepos({ initialRepos, initialTotal, initialTag, initialSort }: TrendingReposProps) {
   const [repos, setRepos] = useState<TrendingRepo[]>(initialRepos)
   const [selectedLanguage, setSelectedLanguage] = useState<string>("all")
-  const [sortBy, setSortBy] = useState<string>("contribution_score")
+  const [sortBy, setSortBy] = useState<string>(initialSort || "contribution_score")
   const [searchQuery, setSearchQuery] = useState<string>("")
   const [tag, setTag] = useState<string>(initialTag || "")
   const [isLoading, setIsLoading] = useState(false)
