@@ -15,7 +15,9 @@ import {
   BookOpen,
   Loader2,
   GitFork,
+  Info,
 } from "lucide-react"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
 interface RepoDetail {
   fullName: string
@@ -148,25 +150,34 @@ function ScoreRing({ score, size = 80 }: { score: number; size?: number }) {
   )
 }
 
-function ScoreBar({ label, value, icon }: { label: string; value: number | null; icon: React.ReactNode }) {
+function ScoreBar({ label, value, icon, description }: { label: string; value: number | null; icon: React.ReactNode; description: string }) {
   if (value === null || value === undefined) return null
   const pct = Math.round(value * 100)
   return (
-    <div className="space-y-1">
-      <div className="flex items-center justify-between text-sm">
-        <span className="flex items-center gap-2 text-muted-foreground">
-          {icon}
-          {label}
-        </span>
-        <span className="tabular-nums font-bold">{pct}</span>
-      </div>
-      <div className="h-2 bg-foreground/10 relative">
-        <div
-          className="h-full bg-foreground/60 transition-all"
-          style={{ width: `${Math.min(pct, 100)}%` }}
-        />
-      </div>
-    </div>
+    <Popover>
+      <PopoverTrigger asChild>
+        <div className="space-y-1 cursor-pointer group">
+          <div className="flex items-center justify-between text-sm">
+            <span className="flex items-center gap-2 text-muted-foreground group-hover:text-foreground transition-colors">
+              {icon}
+              {label}
+              <Info className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </span>
+            <span className="tabular-nums font-bold">{pct}</span>
+          </div>
+          <div className="h-2 bg-foreground/10 relative">
+            <div
+              className="h-full bg-foreground/60 transition-all"
+              style={{ width: `${Math.min(pct, 100)}%` }}
+            />
+          </div>
+        </div>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="text-sm">
+        <div className="font-bold mb-1">{label}</div>
+        <p className="text-muted-foreground">{description}</p>
+      </PopoverContent>
+    </Popover>
   )
 }
 
@@ -240,12 +251,12 @@ export function RepoDetailView({ repo }: { repo: RepoDetail }) {
     fetchIssues()
   }, [repo.fullName])
 
-  const scoreEntries: { label: string; value: number | null; icon: React.ReactNode }[] = [
-    { label: "Acceptance", value: repo.scores.acceptance, icon: <CheckCircle className="w-4 h-4" /> },
-    { label: "Responsiveness", value: repo.scores.responsiveness, icon: <Clock className="w-4 h-4" /> },
-    { label: "Newcomer Friendly", value: repo.scores.newcomer, icon: <Sprout className="w-4 h-4" /> },
-    { label: "Liveness", value: repo.scores.liveness, icon: <Zap className="w-4 h-4" /> },
-    { label: "Throughput", value: repo.scores.throughput, icon: <GitPullRequest className="w-4 h-4" /> },
+  const scoreEntries: { label: string; value: number | null; icon: React.ReactNode; description: string }[] = [
+    { label: "Acceptance", value: repo.scores.acceptance, icon: <CheckCircle className="w-4 h-4" />, description: "How likely a submitted PR is to be merged rather than rejected, with a bonus for repos that merge work from outside contributors (not just the owners)." },
+    { label: "Responsiveness", value: repo.scores.responsiveness, icon: <Clock className="w-4 h-4" />, description: "How quickly maintainers give your pull request its first review. Faster reviews rank higher." },
+    { label: "Newcomer Friendly", value: repo.scores.newcomer, icon: <Sprout className="w-4 h-4" />, description: "How welcoming the repo is to first-timers: whether it flags \"good first issue\"/\"help wanted\" tickets and has a CONTRIBUTING guide and code of conduct." },
+    { label: "Liveness", value: repo.scores.liveness, icon: <Zap className="w-4 h-4" />, description: "How active the repo is right now, based on how recently it was pushed to and last released." },
+    { label: "Throughput", value: repo.scores.throughput, icon: <GitPullRequest className="w-4 h-4" />, description: "How fast and how often PRs actually get merged, knocked down a bit if there's a big backlog of open PRs waiting." },
   ]
 
   const totalPrs = (repo.pr.merged ?? 0) + (repo.pr.closed ?? 0) + (repo.pr.open ?? 0)
@@ -307,34 +318,47 @@ export function RepoDetailView({ repo }: { repo: RepoDetail }) {
       </div>
 
       {/* Main Score */}
-      <div className="border-2 border-foreground p-6">
-        <div className="flex items-center gap-6">
-          <ScoreRing score={repo.scores.contribution} size={100} />
-          <div>
-            <h2 className="text-lg font-bold">Contribution Score</h2>
-            <p className="text-sm text-muted-foreground">
-              {getScoreLabel(repo.scores.contribution)}
-              {repo.confidence !== null && repo.confidence < 1 && (
-                <span className="ml-2">
-                  · {Math.round(repo.confidence * 100)}% confidence
-                </span>
-              )}
-            </p>
-            {repo.scoredAt && (
-              <p className="text-xs text-muted-foreground mt-1">
-                Last scored {getTimeAgo(repo.scoredAt)}
-              </p>
-            )}
+      <Popover>
+        <PopoverTrigger asChild>
+          <div className="border-2 border-foreground p-6 cursor-pointer group">
+            <div className="flex items-center gap-6">
+              <ScoreRing score={repo.scores.contribution} size={100} />
+              <div>
+                <h2 className="text-lg font-bold flex items-center gap-2">
+                  Contribution Score
+                  <Info className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground" />
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  {getScoreLabel(repo.scores.contribution)}
+                  {repo.confidence !== null && repo.confidence < 1 && (
+                    <span className="ml-2">
+                      · {Math.round(repo.confidence * 100)}% confidence
+                    </span>
+                  )}
+                </p>
+                {repo.scoredAt && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Last scored {getTimeAgo(repo.scoredAt)}
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="text-sm">
+          <div className="font-bold mb-1">Contribution Score (Health Score)</div>
+          <p className="text-muted-foreground">
+            The overall "is this a good repo to contribute to?" rating. It blends five measures into one number: how fast your PR gets reviewed (30%), how fast PRs get merged (25%), how likely PRs are to be accepted (20%), how welcoming to newcomers (15%), and how active the repo is (10%).
+          </p>
+        </PopoverContent>
+      </Popover>
 
       {/* Score Breakdown */}
       <div className="border-2 border-foreground p-6">
         <h2 className="text-lg font-bold mb-4">Score Breakdown</h2>
         <div className="space-y-4">
           {scoreEntries.map((entry) => (
-            <ScoreBar key={entry.label} label={entry.label} value={entry.value} icon={entry.icon} />
+            <ScoreBar key={entry.label} label={entry.label} value={entry.value} icon={entry.icon} description={entry.description} />
           ))}
         </div>
       </div>
