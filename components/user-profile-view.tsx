@@ -3,7 +3,6 @@ import type { LucideIcon } from "lucide-react"
 import { Eye, Github, GitCommit, GitPullRequest, MapPin, MessageSquare, User } from "lucide-react"
 import type { Developer } from "@/lib/data"
 import type { ContributionKind } from "@/lib/profile-prototype"
-import { ProfileMessageSidebar } from "@/components/profile-message-button"
 
 const contributionIcon: Record<ContributionKind, LucideIcon> = {
   commit: GitCommit,
@@ -109,8 +108,6 @@ export function UserProfileView({
           </section>
 
           <aside className="flex flex-col gap-8 lg:col-span-4 lg:row-span-2 lg:sticky lg:top-24 lg:self-start min-w-0">
-            <ProfileMessageSidebar targetUsername={dev.username} />
-
             <section className="border-2 border-dashed border-foreground/70 p-5">
               <h2 className="text-sm font-bold uppercase tracking-wide text-highlight mb-3">
                 Impact this week

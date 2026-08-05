@@ -2,7 +2,6 @@ import type { Metadata } from 'next'
 import { JetBrains_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { AuthProvider } from '@/components/auth-provider'
-import { MessageDockProvider } from '@/components/message-dock-provider'
 import { ThemeProvider } from '@/components/theme-provider'
 import { TerminalProvider } from '@/components/terminal-provider'
 import { Terminal } from '@/components/terminal'
@@ -59,14 +58,12 @@ export default function RootLayout({
             enableSystem={false}
           >
             <AuthProvider>
-              <MessageDockProvider>
                 <TerminalProvider>
                   <OrganizationSchema />
                   {children}
                   <Terminal />
                   <Toaster /> {/* Added Toaster here */}
                 </TerminalProvider>
-              </MessageDockProvider>
             </AuthProvider>
           </ThemeProvider>
         </SessionProvider>

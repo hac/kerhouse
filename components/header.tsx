@@ -1,11 +1,10 @@
 "use client"
 
 import Link from "next/link"
-import { Home, Inbox, Palette, TerminalSquare, UserCircle } from "lucide-react"
+import { Home, Palette, TerminalSquare, UserCircle } from "lucide-react"
 import { useTheme } from "next-themes"
 import { useEffect, useState, useRef } from "react"
 import { useSession, signOut as nextSignOut } from "next-auth/react"
-import { useMessageDock } from "./message-dock-provider"
 import { useTerminal } from "./terminal-provider"
 import {
   DropdownMenu,
@@ -29,7 +28,6 @@ export function Header() {
   const { theme, setTheme } = useTheme()
   const { data: session, status } = useSession()
   const { openTerminal } = useTerminal()
-  const { openInbox } = useMessageDock()
   const [mounted, setMounted] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -78,16 +76,6 @@ export function Header() {
             aria-label="Open terminal"
           >
             <TerminalSquare className="w-4 h-4" />
-          </button>
-          <button
-            type="button"
-            disabled={!ready}
-            onClick={() => (user ? openInbox() : undefined)}
-            className="p-1 cursor-pointer hover:text-muted-foreground text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
-            aria-label={user ? "Inbox" : "Sign in to open inbox"}
-            title={user ? "Inbox" : "Sign in"}
-          >
-            <Inbox className="w-4 h-4" strokeWidth={2} />
           </button>
           <div className="relative mr-3" ref={menuRef}>
             <button

@@ -62,9 +62,6 @@ export function FindDevelopers() {
               <button className="border-2 border-foreground px-3 py-1 text-sm hover:bg-foreground hover:text-background">
                 Follow
               </button>
-              <button className="border-2 border-foreground px-3 py-1 text-sm hover:bg-foreground hover:text-background">
-                Message
-              </button>
             </div>
           </div>
         ))}
