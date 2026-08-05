@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
-import { neon } from "@neondatabase/serverless"
+import { getSql } from "@/lib/db"
 
-const sql = neon(process.env.DATABASE_URL!)
+export const dynamic = "force-dynamic"
 
 export interface TrendingRepo {
   name: string
@@ -43,6 +43,7 @@ export interface ReposResponse {
 
 export async function GET(request: Request) {
   try {
+    const sql = getSql()
     const { searchParams } = new URL(request.url)
     const offset = parseInt(searchParams.get("offset") || "0", 10)
     const limit = parseInt(searchParams.get("limit") || "30", 10)
