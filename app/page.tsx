@@ -12,7 +12,7 @@ export const metadata = buildPageMetadata({
   path: "/",
 })
 
-export const revalidate = false
+export const dynamic = "force-dynamic"
 
 function LeaderboardSkeleton() {
   return (

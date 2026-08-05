@@ -14,7 +14,7 @@ export const metadata = buildPageMetadata({
   path: "/insights",
 })
 
-export const revalidate = 3600 // Cache for 1 hour
+export const dynamic = "force-dynamic"
 
 async function getMapData() {
   try {
