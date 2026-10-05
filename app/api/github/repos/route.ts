@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { getSql } from "@/lib/db"
-import { PINNED_REPO_FULL_NAME, pinFirstRepo } from "@/lib/pinned-repo"
+import { PINNED_REPO_FULL_NAME, pinFirstRepoCapped } from "@/lib/pinned-repo"
 
 export const dynamic = "force-dynamic"
 
@@ -34,6 +34,8 @@ export interface TrendingRepo {
   lastReleaseAt: string | null
   mergeVelocityPerMonth: number | null
   gatedReason: string | null
+  /** True only for the hardcoded pin when no repo_health row exists. */
+  isHardcodedFallback?: boolean
 }
 
 export interface ReposResponse {
@@ -189,10 +191,7 @@ export async function GET(request: Request) {
         LIMIT 1`,
         [PINNED_REPO_FULL_NAME]
       )
-      const pinned = pinFirstRepo(repos, pinnedRows[0] ?? null)
-      // Keep the page size stable so client-side offset math stays correct.
-      if (pinned.length > limit) pinned.length = limit
-      payload = pinned
+      payload = pinFirstRepoCapped(repos, pinnedRows[0] ?? null, limit)
     }
 
     const hasMore = offset + limit < total

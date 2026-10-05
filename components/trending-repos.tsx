@@ -299,7 +299,10 @@ export function TrendingRepos({ initialRepos, initialTotal, initialTag, initialS
         {repos.map((repo) => (
           <Link
             key={repo.fullName}
-            href={`/repos/${repo.owner}/${repo.name}`}
+            href={repo.isHardcodedFallback ? repo.url : `/repos/${repo.owner}/${repo.name}`}
+            {...(repo.isHardcodedFallback
+              ? { target: "_blank", rel: "noopener noreferrer" }
+              : {})}
             className="border-2 border-foreground px-4 py-5 flex flex-col group hover:bg-foreground/[0.03]"
           >
             <div className="flex items-start gap-3 mb-2">
