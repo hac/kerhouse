@@ -101,7 +101,7 @@ async function getInitialRepos(tag?: string, sort?: string): Promise<{ repos: Tr
     gatedReason: row.gated_reason,
   }))
 
-  if (sort === "contribution_score" || !sort) {
+  if ((sort === "contribution_score" || !sort) && !tag) {
     const pinnedFullName = "cognizant-ai-lab/neuro-san-studio"
     const idx = repos.findIndex((r) => r.fullName === pinnedFullName)
     if (idx > 0) {
