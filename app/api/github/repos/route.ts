@@ -169,7 +169,7 @@ export async function GET(request: Request) {
       gatedReason: row.gated_reason,
     }))
 
-    if (sort === "contribution_score" && offset === 0) {
+    if (sort === "contribution_score" && offset === 0 && !language && !search && !tag) {
       const pinnedFullName = "cognizant-ai-lab/neuro-san-studio"
       const idx = repos.findIndex((r) => r.fullName === pinnedFullName)
       if (idx > 0) {
