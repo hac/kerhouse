@@ -39,6 +39,9 @@ const FALLBACK: TrendingRepo = {
   lastReleaseAt: null,
   mergeVelocityPerMonth: null,
   gatedReason: null,
+  // Signals there is no repo_health row, so the card must link out to GitHub
+  // instead of /repos/[owner]/[name], which would notFound().
+  isHardcodedFallback: true,
 }
 
 export function mapRepoRow(row: Record<string, any>): TrendingRepo {
@@ -72,6 +75,7 @@ export function mapRepoRow(row: Record<string, any>): TrendingRepo {
     lastReleaseAt: row.last_release_at,
     mergeVelocityPerMonth: row.merge_velocity_per_month,
     gatedReason: row.gated_reason,
+    isHardcodedFallback: false,
   }
 }
 
@@ -83,4 +87,14 @@ export function pinFirstRepo(repos: TrendingRepo[], pinnedRow: Record<string, an
   const pinned = pinnedRow ? mapRepoRow(pinnedRow) : FALLBACK
   const rest = repos.filter((r) => r.fullName !== PINNED_REPO_FULL_NAME)
   return [pinned, ...rest]
+}
+
+/**
+ * Pin, then trim back to `limit` so the page holds exactly `limit` rows.
+ * Without this the client advances its offset past a row it never saw,
+ * permanently skipping a repo during infinite scroll.
+ */
+export function pinFirstRepoCapped(repos: TrendingRepo[], pinnedRow: Record<string, any> | null, limit: number): TrendingRepo[] {
+  const pinned = pinFirstRepo(repos, pinnedRow)
+  return pinned.length > limit ? pinned.slice(0, limit) : pinned
 }

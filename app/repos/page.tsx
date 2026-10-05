@@ -1,7 +1,7 @@
 import { Header } from "@/components/header"
 import { TrendingRepos } from "@/components/trending-repos"
 import { buildPageMetadata } from "@/lib/seo"
-import { PINNED_REPO_FULL_NAME, pinFirstRepo } from "@/lib/pinned-repo"
+import { PINNED_REPO_FULL_NAME, pinFirstRepoCapped } from "@/lib/pinned-repo"
 import type { TrendingRepo } from "@/app/api/github/repos/route"
 import { neon } from "@neondatabase/serverless"
 
@@ -12,6 +12,8 @@ export const metadata = buildPageMetadata({
 })
 
 export const dynamic = 'force-dynamic'
+
+const SSR_PAGE_SIZE = 30
 
 async function getInitialRepos(tag?: string, sort?: string): Promise<{ repos: TrendingRepo[]; total: number }> {
   const sql = neon(process.env.DATABASE_URL!)
@@ -67,7 +69,7 @@ async function getInitialRepos(tag?: string, sort?: string): Promise<{ repos: Tr
     LEFT JOIN github_repos gr ON gr.full_name = rh.full_name
     WHERE rh.gated_reason IS NULL ${tagCondition}
     ORDER BY ${sql.unsafe(orderBy)}
-    LIMIT 30
+    LIMIT ${SSR_PAGE_SIZE}
   `
 
   const repos: TrendingRepo[] = rows.map((row) => ({
@@ -118,7 +120,7 @@ async function getInitialRepos(tag?: string, sort?: string): Promise<{ repos: Tr
       WHERE rh.full_name = ${PINNED_REPO_FULL_NAME}
       LIMIT 1
     `
-    return { repos: pinFirstRepo(repos, pinnedRows[0] ?? null), total }
+    return { repos: pinFirstRepoCapped(repos, pinnedRows[0] ?? null, SSR_PAGE_SIZE), total }
   }
 
   return { repos, total }
