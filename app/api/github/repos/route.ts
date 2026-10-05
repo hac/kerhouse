@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getSql } from "@/lib/db"
+import { PINNED_REPO_FULL_NAME, pinFirstRepo } from "@/lib/pinned-repo"
 
 export const dynamic = "force-dynamic"
 
@@ -169,70 +170,34 @@ export async function GET(request: Request) {
       gatedReason: row.gated_reason,
     }))
 
+    let payload = repos
+
     if (sort === "contribution_score" && offset === 0 && !language && !search && !tag) {
-      const pinnedFullName = "cognizant-ai-lab/neuro-san-studio"
-      const idx = repos.findIndex((r) => r.fullName === pinnedFullName)
-      if (idx > 0) {
-        const [pinned] = repos.splice(idx, 1)
-        repos.unshift(pinned)
-      } else if (idx === -1) {
-        const pinnedRows = await sql.query(
-          `SELECT
-            rh.full_name, rh.owner_login, rh.repo_name, rh.primary_language,
-            rh.stars, gr.forks, gr.description, rh.is_archived, rh.pushed_at,
-            rh.last_release_at, rh.merged_pr_count, rh.median_merge_hours,
-            rh.acceptance_rate, rh.merge_velocity_per_month, rh.open_issues_count,
-            rh.good_first_issues, rh.help_wanted_issues, rh.has_contributing,
-            rh.has_code_of_conduct, rh.mentionable_users, rh.contribution_score,
-            rh.responsiveness_score, rh.throughput_score, rh.acceptance_score,
-            rh.newcomer_score, rh.liveness_score, rh.confidence, rh.gated_reason
-          FROM repo_health rh
-          LEFT JOIN github_repos gr ON gr.full_name = rh.full_name
-          WHERE rh.full_name = $1
-          LIMIT 1`,
-          [pinnedFullName]
-        )
-        if (pinnedRows.length > 0) {
-          const row = pinnedRows[0]
-          repos.unshift({
-            name: row.repo_name,
-            fullName: row.full_name,
-            owner: row.owner_login,
-            stars: row.stars,
-            forks: row.forks,
-            language: row.primary_language,
-            description: row.description,
-            url: `https://github.com/${row.full_name}`,
-            contributionScore: row.contribution_score,
-            responsivenessScore: row.responsiveness_score,
-            throughputScore: row.throughput_score,
-            acceptanceScore: row.acceptance_score,
-            newcomerScore: row.newcomer_score,
-            livenessScore: row.liveness_score,
-            confidence: row.confidence,
-            mergedPrCount: row.merged_pr_count,
-            medianMergeHours: row.median_merge_hours,
-            acceptanceRate: row.acceptance_rate,
-            openIssuesCount: row.open_issues_count,
-            goodFirstIssues: row.good_first_issues,
-            helpWantedIssues: row.help_wanted_issues,
-            hasContributing: row.has_contributing,
-            hasCodeOfConduct: row.has_code_of_conduct,
-            mentionableUsers: row.mentionable_users,
-            isArchived: row.is_archived,
-            pushedAt: row.pushed_at,
-            lastReleaseAt: row.last_release_at,
-            mergeVelocityPerMonth: row.merge_velocity_per_month,
-            gatedReason: row.gated_reason,
-          })
-          repos.pop()
-        }
-      }
+      const pinnedRows = await sql.query(
+        `SELECT
+          rh.full_name, rh.owner_login, rh.repo_name, rh.primary_language,
+          rh.stars, gr.forks, gr.description, rh.is_archived, rh.pushed_at,
+          rh.last_release_at, rh.merged_pr_count, rh.median_merge_hours,
+          rh.acceptance_rate, rh.merge_velocity_per_month, rh.open_issues_count,
+          rh.good_first_issues, rh.help_wanted_issues, rh.has_contributing,
+          rh.has_code_of_conduct, rh.mentionable_users, rh.contribution_score,
+          rh.responsiveness_score, rh.throughput_score, rh.acceptance_score,
+          rh.newcomer_score, rh.liveness_score, rh.confidence, rh.gated_reason
+        FROM repo_health rh
+        LEFT JOIN github_repos gr ON gr.full_name = rh.full_name
+        WHERE rh.full_name = $1
+        LIMIT 1`,
+        [PINNED_REPO_FULL_NAME]
+      )
+      const pinned = pinFirstRepo(repos, pinnedRows[0] ?? null)
+      // Keep the page size stable so client-side offset math stays correct.
+      if (pinned.length > limit) pinned.length = limit
+      payload = pinned
     }
 
     const hasMore = offset + limit < total
 
-    return NextResponse.json({ repos, hasMore, total })
+    return NextResponse.json({ repos: payload, hasMore, total })
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error"
     console.error("Trending repos fetch error:", errorMessage)
